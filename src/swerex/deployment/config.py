@@ -211,6 +211,65 @@ class DaytonaDeploymentConfig(BaseModel):
         return DaytonaDeployment.from_config(self)
 
 
+class TencentAGSDeploymentConfig(BaseModel):
+    """Configuration for Tencent Cloud AGS (Agent Sandbox) SWE sandbox deployment.
+
+    Usage flow:
+        1. Create a SWE sandbox tool on the AGS console (ToolType="swebench") to get a tool_id.
+        2. Provide tool_id + API credentials here.
+        3. Each instance can override the image with a SWE-bench dataset image.
+    """
+
+    type: Literal["tencentags"] = "tencentags"
+    """Discriminator for (de)serialization/CLI. Do not change."""
+
+    secret_id: str = Field(default="", description="Tencent Cloud SecretId (or use TENCENTCLOUD_SECRET_ID env var)")
+    secret_key: str = Field(default="", description="Tencent Cloud SecretKey (or use TENCENTCLOUD_SECRET_KEY env var)")
+    http_endpoint: str = Field(default="ags.tencentcloudapi.com", description="Tencent Cloud HTTP endpoint")
+    skip_ssl_verify: bool = Field(default=False, description="Skip SSL certificate verification")
+    region: str = Field(default="ap-chongqing", description="Region for AGS service")
+    domain: str = Field(default="", description="Domain for sandbox endpoint. Auto-derived from region if empty.")
+
+    tool_id: str = Field(default="", description="SWE SandboxTool ID (created on AGS console)")
+
+    image: str = Field(
+        default="",
+        description="SWE image name for instance override (e.g., 'swebench/sweb.eval.x86_64.xxx:latest')",
+    )
+
+    timeout: str = Field(default="1h", description="Sandbox instance timeout (e.g., '5m', '300s', '1h')")
+    port: int = Field(default=8000, description="Port for sandbox endpoint (default SWE sandbox port)")
+    startup_timeout: float = Field(default=300.0, description="Time to wait for runtime to start")
+    runtime_timeout: float = Field(default=60.0, description="Timeout for runtime requests")
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    def validate_credentials(cls, data: dict) -> dict:
+        """Allow credentials from environment variables as fallback."""
+        import os
+
+        if not isinstance(data, dict):
+            return data
+
+        if not data.get("secret_id"):
+            data["secret_id"] = os.environ.get("TENCENTCLOUD_SECRET_ID", "")
+        if not data.get("secret_key"):
+            data["secret_key"] = os.environ.get("TENCENTCLOUD_SECRET_KEY", "")
+
+        # Auto-derive domain from region if not explicitly set
+        if not data.get("domain"):
+            region = data.get("region", "ap-chongqing")
+            data["domain"] = f"{region}.tencentags.com"
+
+        return data
+
+    def get_deployment(self) -> AbstractDeployment:
+        from swerex.deployment.ags import TencentAGSDeployment
+
+        return TencentAGSDeployment.from_config(self)
+
+
 DeploymentConfig = (
     LocalDeploymentConfig
     | DockerDeploymentConfig
@@ -219,6 +278,7 @@ DeploymentConfig = (
     | RemoteDeploymentConfig
     | DummyDeploymentConfig
     | DaytonaDeploymentConfig
+    | TencentAGSDeploymentConfig
 )
 """Union of all deployment configurations. Useful for type hints."""
 

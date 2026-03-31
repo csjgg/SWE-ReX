@@ -48,5 +48,13 @@ class DeploymentStartupError(SwerexException, RuntimeError): ...
 class DockerPullError(DeploymentStartupError): ...
 
 
+class EnvironmentUnavailableError(SwerexException, RuntimeError):
+    """Raised when the backing execution environment is no longer usable."""
+
+
+class EnvironmentExpiredError(EnvironmentUnavailableError, TimeoutError):
+    """Raised when the backing sandbox instance has expired or disappeared."""
+
+
 class DummyOutputsExhaustedError(SwerexException, RuntimeError):
     """Raised if we try to pop from the dummy runtime's run_in_session_outputs list, but it's empty."""

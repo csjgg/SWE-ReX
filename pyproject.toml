@@ -68,6 +68,10 @@ daytona = [
     "daytona",
     "daytona-sdk >= 0.21",
 ]
+ags = [
+    "tencentcloud-sdk-python-common",
+    "tencentcloud-sdk-python-ags",
+]
 
 [tool.setuptools]
 include-package-data = true

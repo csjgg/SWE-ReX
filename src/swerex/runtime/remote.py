@@ -86,7 +86,7 @@ class RemoteRuntime(AbstractRuntime):
         if exc_transfer.traceback:
             self.logger.critical("Traceback: \n%s", exc_transfer.traceback)
         module, _, exc_name = exc_transfer.class_path.rpartition(".")
-        print(module, exc_name)
+        self.logger.debug("Transfer exception: module=%s, name=%s", module, exc_name)
         if module == "builtins":
             module_obj = __builtins__
         else:

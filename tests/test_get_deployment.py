@@ -8,6 +8,7 @@ from swerex.deployment.config import (
     LocalDeploymentConfig,
     ModalDeploymentConfig,
     RemoteDeploymentConfig,
+    TencentAGSDeploymentConfig,
 )
 from swerex.deployment.daytona import DaytonaDeployment
 from swerex.deployment.docker import DockerDeployment
@@ -45,6 +46,15 @@ def test_get_fargate_deployment():
 def test_get_daytona_deployment():
     deployment = get_deployment(DaytonaDeploymentConfig(image="test"))
     assert isinstance(deployment, DaytonaDeployment)
+
+
+def test_get_ags_deployment():
+    deployment = get_deployment(
+        TencentAGSDeploymentConfig(tool_id="sdt-test", secret_id="id", secret_key="key")
+    )
+    from swerex.deployment.ags import TencentAGSDeployment
+
+    assert isinstance(deployment, TencentAGSDeployment)
 
 
 if __name__ == "__main__":

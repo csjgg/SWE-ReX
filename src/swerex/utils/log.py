@@ -4,11 +4,37 @@ import logging
 import os
 import threading
 
+from rich.console import Console
 from rich.logging import RichHandler
 from rich.text import Text
 
 _SET_UP_LOGGERS = set()
 _ADDITIONAL_HANDLERS = []
+
+# Console instance used by all SWE-ReX loggers.
+# Defaults to a dedicated stderr Console. Call ``set_console()`` *before* the
+# first ``get_logger()`` call to share a Console with Rich Live and avoid
+# garbled output in batch mode.
+_swerex_logging_console: Console | None = None
+
+
+def set_console(console: Console) -> None:
+    """Override the Console used by all future ``get_logger()`` calls.
+
+    Call this early (before any SWE-ReX logger is created) to share a single
+    Console with Rich ``Live``, so that log output is rendered above the Live
+    area instead of clobbering it.
+    """
+    global _swerex_logging_console
+    _swerex_logging_console = console
+
+
+def _get_console() -> Console:
+    """Return the current logging Console, creating a default if needed."""
+    global _swerex_logging_console
+    if _swerex_logging_console is None:
+        _swerex_logging_console = Console(stderr=True)
+    return _swerex_logging_console
 
 
 def _interpret_level_from_env(level: str | None, *, default=logging.DEBUG) -> int:
@@ -55,6 +81,7 @@ def get_logger(name: str, *, emoji: str = "🦖") -> logging.Logger:
         return logger
     handler = _RichHandlerWithEmoji(
         emoji=emoji,
+        console=_get_console(),
         show_time=bool(os.environ.get("SWE_AGENT_LOG_TIME", False)),
         show_path=False,
     )

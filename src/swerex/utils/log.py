@@ -48,6 +48,20 @@ def _interpret_level_from_env(level: str | None, *, default=logging.DEBUG) -> in
 _STREAM_LEVEL = _interpret_level_from_env(os.environ.get("SWE_REX_LOG_STREAM_LEVEL"))
 _INCLUDE_LOGGER_NAME_IN_STREAM_HANDLER = False
 
+
+def set_stream_level(level: int) -> None:
+    """Change the stream (RichHandler) level for all existing and future SWE-ReX loggers.
+
+    Call this in batch mode to reduce console noise while Rich Live is active.
+    """
+    global _STREAM_LEVEL
+    _STREAM_LEVEL = level
+    for name in list(_SET_UP_LOGGERS):
+        logger = logging.getLogger(name)
+        for handler in logger.handlers:
+            if isinstance(handler, RichHandler):
+                handler.setLevel(level)
+
 _THREAD_NAME_TO_LOG_SUFFIX: dict[str, str] = {}
 
 

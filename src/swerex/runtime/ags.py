@@ -10,11 +10,8 @@ Requirements:
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import random
 import ssl
-import uuid
 from typing import Any, Awaitable, Callable
 
 import aiohttp
@@ -110,8 +107,32 @@ class AGSRuntime(RemoteRuntime):
             )
         return exception
 
+    async def _handle_response_errors(self, response: aiohttp.ClientResponse) -> None:
+        """Raise exceptions found in the request response.
+
+        Extends the parent to treat 404 as ``EnvironmentExpiredError``
+        (the AGS sandbox likely expired or was stopped).
+        """
+        if response.status == 511:
+            data = await response.json()
+            exc_transfer = _ExceptionTransfer(**data["swerexception"])
+            self._handle_transfer_exception(exc_transfer)
+        if response.status == 404:
+            try:
+                data = await response.json()
+            except Exception:
+                data = {}
+            message = data.get("message") or data.get("error") or "The requested resource does not exist"
+            raise EnvironmentExpiredError(
+                f"AGS sandbox runtime endpoint returned 404: {message}. "
+                "The sandbox instance likely expired or was stopped."
+            )
+        if response.status >= 400:
+            response.raise_for_status()
+
     # ------------------------------------------------------------------
-    # Override is_alive to add token refresh + SSL skip
+    # Override is_alive / _request only to inject token refresh + SSL.
+    # No logging here — errors propagate as exceptions to the caller.
     # ------------------------------------------------------------------
 
     async def is_alive(self, *, timeout: float | None = None) -> IsAliveResponse:
@@ -140,79 +161,30 @@ class AGSRuntime(RemoteRuntime):
                     except Exception:
                         body = "<could not read response body>"
                     msg = f"GET {url} returned status {response.status}. Body (first 500 chars): {body[:500]}"
-                    self.logger.debug(msg)
                     return IsAliveResponse(is_alive=False, message=msg)
         except aiohttp.ClientError as e:
-            msg = f"Connection error to {url}: {type(e).__name__}: {e}"
-            self.logger.debug(msg)
-            return IsAliveResponse(is_alive=False, message=msg)
+            return IsAliveResponse(is_alive=False, message=f"Connection error to {url}: {e}")
         except Exception as e:
-            msg = f"Unexpected error connecting to {url}: {type(e).__name__}: {e}"
-            self.logger.warning(msg)
-            return IsAliveResponse(is_alive=False, message=msg)
+            return IsAliveResponse(is_alive=False, message=f"Unexpected error connecting to {url}: {e}")
 
-    async def _handle_response_errors(self, response: aiohttp.ClientResponse) -> None:
-        """Raise exceptions found in the request response."""
-        if response.status == 511:
-            data = await response.json()
-            exc_transfer = _ExceptionTransfer(**data["swerexception"])
-            self._handle_transfer_exception(exc_transfer)
-        if response.status == 404:
-            try:
-                data = await response.json()
-            except Exception:
-                data = {}
-            message = data.get("message") or data.get("error") or "The requested resource does not exist"
-            raise EnvironmentExpiredError(
-                f"AGS sandbox runtime endpoint returned 404: {message}. "
-                "The sandbox instance likely expired or was stopped."
-            )
-        if response.status >= 400:
-            data = await response.json()
-            self.logger.critical("Received error response: %s", data)
-            response.raise_for_status()
+    async def _request(self, endpoint: str, payload: BaseModel | None, output_class: Any, num_retries: int = 0):
+        """Make a request with automatic token refresh and SSL skip.
 
-    # ------------------------------------------------------------------
-    # Override _request to add token refresh + SSL skip
-    # ------------------------------------------------------------------
-
-    async def _request(self, endpoint: str, payload: BaseModel | None, output_class: Any, num_retries: int = 3):
-        """Make a request with automatic token refresh and SSL skip support."""
+        No retry loop here (default ``num_retries=0``).  Exceptions are
+        classified into AGS-specific types before re-raising so the caller
+        gets actionable errors (e.g. ``EnvironmentExpiredError``).
+        """
         await self._ensure_valid_token()
-
         request_url = f"{self._api_url}/{endpoint}"
-        request_id = str(uuid.uuid4())
-        headers = self._headers.copy()
-        headers["X-Request-ID"] = request_id
-
-        retry_count = 0
-        last_exception: Exception | None = None
-        retry_delay = 0.5
-        backoff_max = 10
-
-        while retry_count <= num_retries:
-            try:
-                async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(force_close=True)) as session:
-                    async with session.post(
-                        request_url,
-                        json=payload.model_dump() if payload else None,
-                        headers=headers,
-                        ssl=self._ssl_param,
-                    ) as resp:
-                        await self._handle_response_errors(resp)
-                        return output_class(**await resp.json())
-            except Exception as e:
-                last_exception = e
-                retry_count += 1
-                if retry_count <= num_retries:
-                    await asyncio.sleep(retry_delay)
-                    retry_delay *= 2
-                    retry_delay += random.uniform(0, 0.5)
-                    retry_delay = min(retry_delay, backoff_max)
-                    continue
-                classified_exception = self._classify_request_exception(e, request_url)
-                self.logger.error(
-                    "Error making request %s after %d retries: %s", request_id, num_retries, classified_exception
-                )
-                raise classified_exception
-        raise self._classify_request_exception(last_exception, request_url)  # type: ignore[arg-type]
+        try:
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(force_close=True)) as session:
+                async with session.post(
+                    request_url,
+                    json=payload.model_dump() if payload else None,
+                    headers=self._headers,
+                    ssl=self._ssl_param,
+                ) as resp:
+                    await self._handle_response_errors(resp)
+                    return output_class(**await resp.json())
+        except Exception as e:
+            raise self._classify_request_exception(e, request_url) from e
